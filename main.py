@@ -3,6 +3,7 @@ import pytesseract
 import numpy as np
 from PIL import Image
 import os
+from argparse import ArgumentParser
 from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Prompt
@@ -595,7 +596,7 @@ class OCRApp:
         "4": ("German", "deu")
     }
     
-    def run(self):
+    def run(self, imgpath=None):
         console.print(Panel(
             "[bold cyan]IMPROVED OCR SYSTEM - TABLE EXTRACTION FIXED[/bold cyan]\n"
             "✓ Enhanced img2table with borderless support\n"
@@ -610,12 +611,13 @@ class OCRApp:
         ))
         
         while True:
-            path = Prompt.ask("\nImage path").strip('"')
-            if os.path.exists(path):
+            if imgpath == None:
+                imgpath = Prompt.ask("\nImage path").strip('"')
+            if os.path.exists(imgpath):
                 console.print("[green]✓ Opening image...[/green]")
-                os.startfile(path)
+                os.startfile(imgpath)
                 break
-            console.print("[red]File not found[/red]")
+            console.print("[red]File not found: ", imgpath, "[/red]")
         
         console.print("\n[bold]Languages:[/bold]")
         for k, (name, _) in self.LANGUAGES.items():
@@ -645,7 +647,7 @@ class OCRApp:
         
         console.print()
         with Status("[green]Processing...[/green]"):
-            processor = OCRProcessor(path, language)
+            processor = OCRProcessor(imgpath, language)
             result = processor.process(
                 mode=mode, 
                 num_columns=num_cols, 
@@ -683,7 +685,7 @@ class OCRApp:
             console.print(Panel(preview, expand=False))
         
         # Save files
-        base = os.path.splitext(os.path.basename(path))[0]
+        base = os.path.splitext(os.path.basename(imgpath))[0]
         saved = []
         
         if result['table']:
@@ -737,11 +739,65 @@ class OCRApp:
         if saved:
             os.startfile(saved[0])
 
+    def runsilent(self, imgpath, language="eng", mode="text", fix_orient=False, 
+                    columns=None, savecompares=False):
+        # language: "eng", "spa", "fra", "deu"
+        # mode: "table", "text", "handwritten", "mixed"
+        # columns: None is auto detect, integer otherwise
+        if not os.path.exists(imgpath):
+            console.print("[red]File not found: ", imgpath, "[/red]")
+            return
+
+        processor = OCRProcessor(imgpath, language)
+        result = processor.process(
+            mode=mode, 
+            num_columns=columns, 
+            fix_orientation=fix_orient,
+            save_comparison=savecompares
+        )
+        return result
+
 
 if __name__ == "__main__":
+    parser = ArgumentParser(
+        description="Use OCR on images for text and tables.",
+    )
+    parser.add_argument('-i', '--image', type = str, default=None,
+                        help ='the path to the image')
+
+    parser.add_argument('-s', '--silent', action='store_true',
+	                    help='Silent: do not prompt for options. default false')
+
+    parser.add_argument('-l', '--language', type = str, default="eng",
+                        help ='the language to parse: "eng", "spa", "fra", "deu"')
+                        
+    parser.add_argument('-m', '--mode', type = str, default="mixed",
+                        help ='the mode: "table", "text", "handwritten", "mixed"')
+
+    parser.add_argument('--cols', type = int, default=None,
+	                    help='Check for specific columns. default auto')
+                        
+    parser.add_argument('-o', '--orientationcheck', action='store_true',
+	                    help='Check for orientation. default false')
+                        
+    parser.add_argument('-c', '--savecompares', action='store_true',
+	                    help='Save comparison images. default false')
+                        
+    args = parser.parse_args()
+
     try:
         app = OCRApp()
-        app.run()
+        if args.silent:
+            result = app.runsilent(args.image, 
+                        language=args.language, 
+                        mode=args.mode,
+                        fix_orient=args.orientationcheck,
+                        columns=args.cols,
+                        savecompares=args.savecompares
+            )
+            console.print(result)
+        else:
+            app.run(imgpath=args.image)
     except KeyboardInterrupt:
         console.print("\n[yellow]Interrupted[/yellow]")
     except Exception as e:
