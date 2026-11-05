@@ -3,6 +3,7 @@ import pytesseract
 import numpy as np
 from PIL import Image
 import os
+from argparse import ArgumentParser
 from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Prompt
@@ -14,8 +15,6 @@ import tempfile
 from img2table.document import Image as Img2TableImage
 from img2table.ocr import TesseractOCR
 
-console = Console()
-
 pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 envpaths = os.environ.get('PATH').split(';')
 for envpath in envpaths:
@@ -24,6 +23,21 @@ for envpath in envpaths:
         pytesseract.pytesseract.tesseract_cmd = envpath
         break
 
+console = Console()
+verbose = None
+# level 1: saved extra images
+# level 2: output
+# level 3: big headers
+# level 4: Processing and opening/saving messages
+# level 5: warnings (yellow), scores, methods and info
+# Note: errors are always printed
+
+def printer(text, lvl=None):
+    if verbose == None or lvl == None:
+        console.print(text)
+    elif verbose >= lvl:
+        console.print(text)
+    
 
 def ocr_preprocess(image):
     """
@@ -134,7 +148,7 @@ class Img2TableExtractor:
             return table_data
             
         except Exception as e:
-            console.print(f"[yellow]img2table error: {e}[/yellow]")
+            printer(f"[yellow]img2table error: {e}[/yellow]", lvl=5)
             return []
             
         finally:
@@ -177,7 +191,7 @@ class SmartOrientationCorrector:
     
     @staticmethod
     def fix(image, language="eng"):
-        console.print("[yellow]Testing orientations...[/yellow]")
+        printer("[yellow]Testing orientations...[/yellow]", lvl=4)
         
         versions = {
             0: image.copy(),
@@ -190,15 +204,15 @@ class SmartOrientationCorrector:
         for angle, img in versions.items():
             score = SmartOrientationCorrector.score_orientation(img, language)
             results.append((angle, img, score))
-            console.print(f"[dim]{angle:3d}°: score={score}[/dim]")
+            printer(f"[dim]{angle:3d}°: score={score}[/dim]", lvl=5)
         
         best_angle, best_img, best_score = max(results, key=lambda x: x[2])
         
         if best_score < 50:
-            console.print("[yellow]⚠ Low confidence, keeping original[/yellow]")
+            printer("[yellow]⚠ Low confidence, keeping original[/yellow]", lvl=5)
             return image, 0
         
-        console.print(f"[green]✓ Selected: {best_angle}° (score: {best_score})[/green]")
+        printer(f"[green]✓ Selected: {best_angle}° (score: {best_score})[/green]", lvl=4)
         return best_img, best_angle
 
 
@@ -212,7 +226,7 @@ class ImprovedHandwrittenOCR:
         self.preprocessed_img = None
     
     def extract(self):
-        console.print("[cyan]Processing handwritten text...[/cyan]")
+        printer("[cyan]Processing handwritten text...[/cyan]", lvl=4)
 
         results = []
         preprocessed_images = []
@@ -230,7 +244,7 @@ class ImprovedHandwrittenOCR:
         text1 = pytesseract.image_to_string(thresh1, lang=self.language, config='--oem 1 --psm 6')
         results.append(text1.strip())
         preprocessed_images.append(thresh1)
-        console.print(f"[dim]Method 1: {len(text1.strip())} chars[/dim]")
+        printer(f"[dim]Method 1: {len(text1.strip())} chars[/dim]", lvl=5)
 
         # -------------------------------
         # Method 2: 3x upscale + contrast
@@ -246,7 +260,7 @@ class ImprovedHandwrittenOCR:
         text2 = pytesseract.image_to_string(thresh2, lang=self.language, config='--oem 1 --psm 6')
         results.append(text2.strip())
         preprocessed_images.append(thresh2)
-        console.print(f"[dim]Method 2: {len(text2.strip())} chars[/dim]")
+        printer(f"[dim]Method 2: {len(text2.strip())} chars[/dim]", lvl=5)
 
         # -------------------------------
         # Pick the longest text (most characters)
@@ -254,7 +268,7 @@ class ImprovedHandwrittenOCR:
         best_idx = max(range(len(results)), key=lambda i: len(results[i]))
         best = results[best_idx]
         self.preprocessed_img = preprocessed_images[best_idx]
-        console.print(f"[green]✓ Best result: {len(best)} characters (Method {best_idx + 1})[/green]")
+        printer(f"[green]✓ Best result: {len(best)} characters (Method {best_idx + 1})[/green]", lvl=4)
 
         return best
 
@@ -274,14 +288,14 @@ class ImprovedTableExtractor:
         """Enhanced table extraction with proper column alignment"""
         
         # First try img2table (best for bordered tables)
-        console.print("[dim]Trying img2table method...[/dim]")
+        printer("[dim]Trying img2table method...[/dim]", lvl=4)
         img2table_result = Img2TableExtractor().extract(self.image)
         if img2table_result and len(img2table_result) > 0:
-            console.print(f"[green]✓ img2table found {len(img2table_result)} rows[/green]")
+            printer(f"[green]✓ img2table found {len(img2table_result)} rows[/green]", lvl=4)
             self.preprocessed_img = ocr_preprocess(self.image)
             return img2table_result
         
-        console.print("[dim]img2table failed, using OCR-based extraction...[/dim]")
+        printer("[dim]img2table failed, using OCR-based extraction...[/dim]", lvl=5)
         
         # Fallback: OCR-based extraction with column clustering
         gray = cv2.cvtColor(self.image, cv2.COLOR_BGR2GRAY)
@@ -348,7 +362,7 @@ class ImprovedTableExtractor:
                         column_boundaries.append((all_x_positions[i-1] + all_x_positions[i]) // 2)
                 
                 num_columns = len(column_boundaries)
-                console.print(f"[dim]Auto-detected {num_columns} columns[/dim]")
+                printer(f"[dim]Auto-detected {num_columns} columns[/dim]", lvl=4)
         else:
             # Divide image width into equal columns
             img_width = self.image.shape[1]
@@ -454,7 +468,7 @@ class ImprovedMixedContentHandler:
         contours, _ = cv2.findContours(combined, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
         if not contours:
-            console.print("[yellow]No contours detected in table region analysis[/yellow]")
+            printer("[yellow]No contours detected in table region analysis[/yellow]", lvl=5)
             return None
         
         # Find largest rectangular region
@@ -465,20 +479,20 @@ class ImprovedMixedContentHandler:
         
         # More lenient threshold for table detection
         area_percentage = area / img_area * 100
-        console.print(f"[dim]Largest region: {w}x{h} ({area_percentage:.1f}% of image)[/dim]")
+        printer(f"[dim]Largest region: {w}x{h} ({area_percentage:.1f}% of image)[/dim]", lvl=5)
         
         if area > img_area * 0.02:  # At least 2% of image (lowered from 3%)
-            console.print(f"[green]✓ Table region detected: {w}x{h} ({area_percentage:.1f}% of image)[/green]")
+            printer(f"[green]✓ Table region detected: {w}x{h} ({area_percentage:.1f}% of image)[/green]", lvl=4)
             
             # Save debug image
             debug_img = self.image.copy()
             cv2.rectangle(debug_img, (x, y), (x+w, y+h), (0, 255, 0), 3)
             cv2.imwrite("debug_table_region.png", debug_img)
-            console.print("[dim]Saved: debug_table_region.png[/dim]")
+            printer("[dim]Saved: debug_table_region.png[/dim]", lvl=1)
             
             return {'x': x, 'y': y, 'w': w, 'h': h}
         
-        console.print(f"[yellow]Region too small ({area_percentage:.1f}%), no table detected[/yellow]")
+        printer(f"[yellow]Region too small ({area_percentage:.1f}%), no table detected[/yellow]", lvl=5)
         return None
     
     def extract_mixed(self, num_columns=None):
@@ -502,15 +516,15 @@ class ImprovedMixedContentHandler:
             table_img = self.image[y_start:y_end, x_start:x_end]
             
             # IMPORTANT: Use ImprovedTableExtractor which has the fixed img2table logic
-            console.print("[dim]Extracting table from detected region...[/dim]")
+            printer("[dim]Extracting table from detected region...[/dim]", lvl=4)
             extractor = ImprovedTableExtractor(table_img)
             table = extractor.extract(num_columns)
             
             if table and len(table) > 0:
                 result['table'] = table
-                console.print(f"[green]✓ Extracted table: {len(table)} rows × {len(table[0]) if table else 0} columns[/green]")
+                printer(f"[green]✓ Extracted table: {len(table)} rows × {len(table[0]) if table else 0} columns[/green]", lvl=4)
             else:
-                console.print("[yellow]⚠ Table region detected but extraction failed[/yellow]")
+                printer("[yellow]⚠ Table region detected but extraction failed[/yellow]", lvl=4)
             
             # Text above table
             if y_start > 20:
@@ -526,7 +540,7 @@ class ImprovedMixedContentHandler:
                 if text_below and len(text_below.strip()) > 0:
                     result['text_below'] = text_below
         else:
-            console.print("[yellow]No table detected, treating as pure text[/yellow]")
+            printer("[yellow]No table detected, treating as pure text[/yellow]", lvl=5)
             result['text_above'] = TextExtractor(self.image, self.language).extract()
         
         # Full text extraction
@@ -553,16 +567,16 @@ class OCRProcessor:
         # Save original for comparison
         if save_comparison:
             cv2.imwrite("original_image.png", img_original)
-            console.print("[dim]Saved: original_image.png[/dim]")
+            printer("[dim]Saved: original_image.png[/dim]", lvl=1)
         
         if fix_orientation:
-            console.print("[bold cyan]═══ ORIENTATION CHECK ═══[/bold cyan]")
+            printer("[bold cyan]═══ ORIENTATION CHECK ═══[/bold cyan]", lvl=3)
             img, angle = SmartOrientationCorrector.fix(img, self.language)
             if save_comparison and angle != 0:
                 cv2.imwrite("corrected_orientation.png", img)
-                console.print("[dim]Saved: corrected_orientation.png[/dim]")
+                printer("[dim]Saved: corrected_orientation.png[/dim]", lvl=1)
         
-        console.print(f"[bold cyan]═══ MODE: {mode.upper()} ═══[/bold cyan]\n")
+        printer(f"[bold cyan]═══ MODE: {mode.upper()} ═══[/bold cyan]\n", lvl=3)
         
         result = {'mode': mode, 'text': None, 'table': None, 'text_above': None, 'text_below': None}
         
@@ -603,8 +617,8 @@ class OCRApp:
         "4": ("German", "deu")
     }
     
-    def run(self):
-        console.print(Panel(
+    def run(self, imgpath=None):
+        printer(Panel(
             "[bold cyan]IMPROVED OCR SYSTEM - TABLE EXTRACTION FIXED[/bold cyan]\n"
             "✓ Enhanced img2table with borderless support\n"
             "✓ Improved column detection & alignment\n"
@@ -615,15 +629,16 @@ class OCRApp:
             "✓ Multi-language support\n"
             "✓ Debug visualization",
             expand=False
-        ))
+        ), lvl=5)
         
         while True:
-            path = Prompt.ask("\nImage path").strip('"')
-            if os.path.exists(path):
-                console.print("[green]✓ Opening image...[/green]")
-                os.startfile(path)
+            if imgpath == None:
+                imgpath = Prompt.ask("\nImage path").strip('"')
+            if os.path.exists(imgpath):
+                printer("[green]✓ Opening image...[/green]", lvl=4)
+                os.startfile(imgpath)
                 break
-            console.print("[red]File not found[/red]")
+            console.print("[red]File not found: ", imgpath, "[/red]")
         
         console.print("\n[bold]Languages:[/bold]")
         for k, (name, _) in self.LANGUAGES.items():
@@ -653,7 +668,7 @@ class OCRApp:
         
         console.print()
         with Status("[green]Processing...[/green]"):
-            processor = OCRProcessor(path, language)
+            processor = OCRProcessor(imgpath, language)
             result = processor.process(
                 mode=mode, 
                 num_columns=num_cols, 
@@ -665,8 +680,8 @@ class OCRApp:
         
         # Display results
         if result['text_above']:
-            console.print("[yellow]📄 TEXT ABOVE TABLE:[/yellow]")
-            console.print(Panel(result['text_above'][:300], expand=False))
+            printer("[yellow]📄 TEXT ABOVE TABLE:[/yellow]", lvl=2)
+            printer(Panel(result['text_above'][:300], expand=False), lvl=2)
         
         if result['table']:
             display = RichTable(show_header=False, show_lines=True, title="📊 TABLE")
@@ -678,20 +693,20 @@ class OCRApp:
             for row in result['table']:
                 display.add_row(*row)
             
-            console.print(display)
-            console.print(f"[green]✓ {len(result['table'])} rows × {max_cols} columns[/green]\n")
+            printer(display, lvl=2)
+            printer(f"[green]✓ {len(result['table'])} rows × {max_cols} columns[/green]\n", lvl=2)
         
         if result['text_below']:
-            console.print("[yellow]📄 TEXT BELOW TABLE:[/yellow]")
-            console.print(Panel(result['text_below'][:300], expand=False))
+            printer("[yellow]📄 TEXT BELOW TABLE:[/yellow]", lvl=2)
+            printer(Panel(result['text_below'][:300], expand=False), lvl=2)
         
         if result['text'] and not result['table']:
-            console.print("[yellow]📄 TEXT:[/yellow]")
+            printer("[yellow]📄 TEXT:[/yellow]", lvl=2)
             preview = result['text'][:500] + ("..." if len(result['text']) > 500 else "")
-            console.print(Panel(preview, expand=False))
+            printer(Panel(preview, expand=False), lvl=2)
         
         # Save files
-        base = os.path.splitext(os.path.basename(path))[0]
+        base = os.path.splitext(os.path.basename(imgpath))[0]
         saved = []
         
         if result['table']:
@@ -726,16 +741,16 @@ class OCRApp:
             saved.append(f)
         
         if saved:
-            console.print(f"\n[green]✓ Saved: {', '.join(saved)}[/green]")
+            printer(f"\n[green]✓ Saved: {', '.join(saved)}[/green]", lvl=4)
         
         # Show comparison images info
         if save_comparison:
-            console.print("\n[bold cyan]Comparison Images:[/bold cyan]")
-            console.print("  • original_image.png - Your uploaded image")
+            printer("\n[bold cyan]Comparison Images:[/bold cyan]", lvl=4)
+            printer("  • original_image.png - Your uploaded image", lvl=4)
             if fix_orient:
-                console.print("  • corrected_orientation.png - After rotation (if rotated)")
+                printer("  • corrected_orientation.png - After rotation (if rotated)", lvl=4)
             if mode == "mixed":
-                console.print("  • debug_table_region.png - Detected table region")
+                printer("  • debug_table_region.png - Detected table region", lvl=4)
         
         # Show final preprocessed image (what OCR actually saw)
         if hasattr(processor, "final_preprocessed_img") and processor.final_preprocessed_img is not None:
@@ -745,11 +760,69 @@ class OCRApp:
         if saved:
             os.startfile(saved[0])
 
+    def run_cli(self, imgpath, language="eng", mode="text", fix_orient=False, 
+                    columns=None, savecompares=False):
+        # language: "eng", "spa", "fra", "deu"
+        # mode: "table", "text", "handwritten", "mixed"
+        # columns: None is auto detect, integer otherwise
+        if not os.path.exists(imgpath):
+            console.print("[red]File not found: ", imgpath, "[/red]")
+            return
+
+        processor = OCRProcessor(imgpath, language)
+        result = processor.process(
+            mode=mode, 
+            num_columns=columns, 
+            fix_orientation=fix_orient,
+            save_comparison=savecompares
+        )
+        return result
+
 
 if __name__ == "__main__":
+    parser = ArgumentParser(
+        description="Use OCR on images for text and tables.",
+    )
+    parser.add_argument('-i', '--image', type = str, default=None,
+                        help ='the path to the image')
+
+    parser.add_argument('-c', '--cli', action='store_true',
+	                    help='command line: do not prompt for options, given via CLI')
+
+    parser.add_argument('-v', '--verbose', type = int, default=None,
+	                    help='Verbosity level: 0=no output, 1=least,... default all')
+
+    parser.add_argument('-l', '--language', type = str, default="eng",
+                        help ='the language to parse: "eng", "spa", "fra", "deu"')
+                        
+    parser.add_argument('-m', '--mode', type = str, default="mixed",
+                        help ='the mode: "table", "text", "handwritten", "mixed"')
+
+    parser.add_argument('--cols', type = int, default=None,
+	                    help='Check for specific columns. default auto')
+                        
+    parser.add_argument('-o', '--orientationcheck', action='store_true',
+	                    help='Check for orientation. default false')
+                        
+    parser.add_argument('-s', '--savecompares', action='store_true',
+	                    help='Save intermediate (comparison) images. default false')
+                        
+    args = parser.parse_args()
+
     try:
+        verbose = args.verbose
         app = OCRApp()
-        app.run()
+        if args.cli:
+            result = app.run_cli(args.image,
+                        language=args.language, 
+                        mode=args.mode,
+                        fix_orient=args.orientationcheck,
+                        columns=args.cols,
+                        savecompares=args.savecompares
+            )
+            printer(result, lvl=2)
+        else:
+            app.run(imgpath=args.image)
     except KeyboardInterrupt:
         console.print("\n[yellow]Interrupted[/yellow]")
     except Exception as e:
