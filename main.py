@@ -15,7 +15,15 @@ from img2table.document import Image as Img2TableImage
 from img2table.ocr import TesseractOCR
 
 console = Console()
+
 pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+envpaths = os.environ.get('PATH').split(';')
+for envpath in envpaths:
+    envpath += "\\tesseract.exe"
+    if os.path.exists(envpath):
+        pytesseract.pytesseract.tesseract_cmd = envpath
+        break
+
 
 def ocr_preprocess(image):
     """
