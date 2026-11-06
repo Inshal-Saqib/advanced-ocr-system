@@ -120,7 +120,7 @@ class Img2TableExtractor:
                 pil_img.save(image_path)
                 cleanup_temp = True
             else:
-                console.print(f"[red]Unsupported image type: {type(image)}[/red]")
+                console.print(f"[red]Unsupported image type:[/red] {type(image)}")
                 return []
             
             # Create img2table document from file path
@@ -638,7 +638,7 @@ class OCRApp:
                 printer("[green]✓ Opening image...[/green]", lvl=4)
                 os.startfile(imgpath)
                 break
-            console.print("[red]File not found: ", imgpath, "[/red]")
+            console.print("[bold red]File not found:[/bold red] ", imgpath)
         
         console.print("\n[bold]Languages:[/bold]")
         for k, (name, _) in self.LANGUAGES.items():
@@ -766,7 +766,7 @@ class OCRApp:
         # mode: "table", "text", "handwritten", "mixed"
         # columns: None is auto detect, integer otherwise
         if not os.path.exists(imgpath):
-            console.print("[red]File not found: ", imgpath, "[/red]")
+            console.print("[bold red]File not found:[/bold red] ", imgpath)
             return
 
         processor = OCRProcessor(imgpath, language)
@@ -826,6 +826,6 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         console.print("\n[yellow]Interrupted[/yellow]")
     except Exception as e:
-        console.print(f"[red]Error: {e}[/red]")
+        console.print(f"[bold red]Error:[/bold red] {e}")
         import traceback
         traceback.print_exc()
